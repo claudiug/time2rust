@@ -5,5 +5,5 @@ edition = "2024"
 
 [dependencies]
 chrono = { version = "0.4" }
-egui = "0.29"
-eframe = "0.29"
+gpui = "0.2"
+gpui-component = "0.4.0-preview1"

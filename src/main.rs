@@ -1,5 +1,9 @@
 use chrono::Utc;
-use eframe::egui;
+use gpui::{
+    App, Application, Bounds, Context, Entity, SharedString, TitlebarOptions, Window, WindowBounds,
+    WindowOptions, div, prelude::*, px, rgb, size,
+};
+use gpui_component::{ActiveTheme as _, Sizable, tag::Tag};
 
 #[derive(Debug, Clone)]
 pub struct WorldTime {
@@ -38,151 +42,183 @@ impl WorldTime {
     }
 }
 
-struct WorldTimeApp {
-    cities: Vec<WorldTime>,
-    last_update: std::time::Instant,
-    disable_resizing: bool,
-}
+impl Render for WorldTime {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let frame_color = if self.is_home {
+            rgb(0x3b82f6) // Blue border for home
+        } else {
+            rgb(0x6b7280) // Gray for others
+        };
 
-impl Default for WorldTimeApp {
-    fn default() -> Self {
-        let austin = WorldTime::new("Austin", "America/Chicago", true, 0);
-        let nyc = WorldTime::new("NYC", "America/New_York", false, 1);
-        let london = WorldTime::new("London", "Europe/London", false, 6);
-        let berlin = WorldTime::new("Berlin", "Europe/Berlin", false, 7);
-        let bucharest = WorldTime::new("Bucharest", "Europe/Bucharest", false, 8);
+        let bg_color = if self.is_home {
+            rgb(0xf0f9ff) // Light blue background for home
+        } else {
+            rgb(0xf9fafb) // Light gray for others
+        };
 
-        Self {
-            cities: vec![austin, nyc, london, berlin, bucharest],
-            last_update: std::time::Instant::now(),
-            disable_resizing: false,
-        }
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_4()
+            .min_w(px(180.0))
+            .bg(bg_color)
+            .border_2()
+            .border_color(frame_color)
+            .rounded(px(8.0))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_1()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .child(self.name.to_string())
+                                    .text_lg()
+                                    .font_weight(gpui::FontWeight::BOLD)
+                                    .text_color(if self.is_home {
+                                        rgb(0x3b82f6)
+                                    } else {
+                                        rgb(0x111827)
+                                    }),
+                            )
+                            .children(self.is_home.then(|| Tag::secondary().small().child("Home"))),
+                    )
+                    .child(
+                        div().flex().items_center().gap_2().child(
+                            div()
+                                .child(self.time.to_string())
+                                .text_3xl()
+                                .font_weight(gpui::FontWeight::BOLD)
+                                .text_color(rgb(0x111827)),
+                        ),
+                    )
+                    .child(
+                        div()
+                            .child(format!("Δ {} hours", self.diff_hours).to_string())
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::BOLD)
+                            .text_color(if self.diff_hours >= 0 {
+                                rgb(0x22c55e)
+                            } else {
+                                rgb(0xef4444)
+                            }),
+                    )
+                    .child(
+                        div().flex().items_center().gap_1().child(
+                            div()
+                                .child(self.timezone_id.to_string())
+                                .text_xs()
+                                .text_color(rgb(0x6b7280)),
+                        ),
+                    ),
+            )
     }
 }
+struct WorldTimeApp {
+    cities: Vec<Entity<WorldTime>>,
+    last_update: std::time::Instant,
+}
 
-impl eframe::App for WorldTimeApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Only update every minute to save CPU (don't care about seconds)
+impl Render for WorldTimeApp {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Update times every minute
         let now = std::time::Instant::now();
         if now.duration_since(self.last_update).as_secs() >= 60 {
-            // Update all city times once per minute
-            for city in &mut self.cities {
-                city.update_time();
+            for city in &self.cities {
+                city.update(cx, |city, _cx| {
+                    city.update_time();
+                });
             }
             self.last_update = now;
-
-            // Request repaint since time updated
-            ctx.request_repaint();
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("🌍 World Time Display");
-
-            ui.separator();
-
-            // Display all cities in a responsive grid (all visible at once)
-            egui::Grid::new("cities_grid")
-                .spacing([15.0, 15.0])
-                .show(ui, |ui| {
-                    for (index, city) in self.cities.iter().enumerate() {
-                        // City card with enhanced styling
-                        let frame_color = if city.is_home {
-                            egui::Color32::from_rgb(59, 130, 246) // Blue border for home
-                        } else {
-                            ui.style().visuals.widgets.noninteractive.bg_fill
-                        };
-
-                        egui::Frame::group(ui.style())
-                            .stroke(egui::Stroke::new(2.0, frame_color))
-                            .fill(if city.is_home {
-                                egui::Color32::from_rgb(240, 249, 255) // Light blue background for home
-                            } else {
-                                egui::Color32::from_rgb(249, 250, 251) // Light gray for others
-                            })
-                            .rounding(8.0)
-                            .show(ui, |ui| {
-                                ui.set_min_width(180.0);
-                                ui.vertical_centered(|ui| {
-                                    ui.add_space(8.0);
-
-                                    // City name - bigger and highlighted for home
-                                    if city.is_home {
-                                        ui.label(
-                                            egui::RichText::new(format!("🏠 {}", &city.name))
-                                                .size(20.0)
-                                                .strong()
-                                                .color(egui::Color32::from_rgb(59, 130, 246)),
-                                        );
-                                    } else {
-                                        ui.heading(&city.name);
-                                    }
-
-                                    ui.add_space(8.0);
-
-                                    // Current time - BIGGER and more prominent
-                                    ui.horizontal(|ui| {
-                                        ui.label(egui::RichText::new("🕐").size(26.0));
-                                        ui.label(
-                                            egui::RichText::new(&city.time)
-                                                .size(32.0)
-                                                .strong()
-                                                .color(egui::Color32::from_rgb(17, 24, 39)),
-                                        );
-                                    });
-
-                                    ui.add_space(6.0);
-
-                                    // Time difference with better styling
-                                    let diff_color = if city.diff_hours >= 0 {
-                                        egui::Color32::from_rgb(34, 197, 94) // Green-500
-                                    } else {
-                                        egui::Color32::from_rgb(239, 68, 68) // Red-500
-                                    };
-
-                                    ui.colored_label(
-                                        diff_color,
-                                        egui::RichText::new(format!("Δ {} hours", city.diff_hours))
-                                            .strong(),
-                                    );
-
-                                    // Timezone
-                                    ui.horizontal(|ui| {
-                                        ui.label("🌍");
-                                        ui.label(
-                                            egui::RichText::new(&city.timezone_id)
-                                                .color(egui::Color32::from_rgb(107, 114, 128)),
-                                        );
-                                    });
-
-                                    ui.add_space(8.0);
-                                });
-                            });
-
-                        // New row every 3 cities for responsive layout
-                        if (index + 1) % 3 == 0 {
-                            ui.end_row();
-                        }
-                    }
-                });
-        });
+        div()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .p_6()
+            .bg(cx.theme().background)
+            .size_full()
+            .child(
+                div()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child("🌍 World Time Display"),
+                    )
+                    .text_2xl()
+                    .font_weight(gpui::FontWeight::BOLD)
+                    .text_color(cx.theme().accent_foreground)
+                    .text_center(),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_8()
+                    .justify_center()
+                    .children(self.cities.iter().map(|city| city.clone())),
+            )
     }
 }
+fn main() {
+    Application::new().run(|cx: &mut App| {
+        // This must be called before using any GPUI Component features.
+        gpui_component::init(cx);
 
-fn main() -> eframe::Result<()> {
-    // Create the app instance first to access its configuration
-    let app = WorldTimeApp::default();
+        // Handle window closing - quit app when last window closes
+        cx.on_window_closed(|cx| {
+            if cx.windows().is_empty() {
+                cx.quit();
+            }
+        })
+        .detach();
 
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([650.0, 450.0]) // More reasonable window size
-            .with_title("World Time Display")
-            .with_resizable(app.disable_resizing),
-        ..Default::default()
-    };
+        let bounds = Bounds::centered(None, size(px(800.0), px(600.0)), cx);
+        cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                titlebar: Some(TitlebarOptions {
+                    title: Some(SharedString::from("🌍 World Time Display")),
+                    ..Default::default()
+                }),
+                show: true,
+                ..Default::default()
+            },
+            |window, cx| {
+                cx.new(|cx| {
+                    // Prevent window maximization
+                    cx.observe_window_bounds(window, move |_, window, _cx| {
+                        if window.is_maximized() {
+                            // Restore to original size when maximized
+                            window.resize(size(px(800.0), px(600.0)));
+                        }
+                    })
+                    .detach();
 
-    eframe::run_native(
-        "World Time Display",
-        options,
-        Box::new(|_cc| Ok(Box::new(app))),
-    )
+                    let austin = cx.new(|_| WorldTime::new("Austin", "America/Chicago", true, 0));
+                    let nyc = cx.new(|_| WorldTime::new("NYC", "America/New_York", false, 1));
+                    let london = cx.new(|_| WorldTime::new("London", "Europe/London", false, 6));
+                    let berlin = cx.new(|_| WorldTime::new("Berlin", "Europe/Berlin", false, 7));
+                    let bucharest =
+                        cx.new(|_| WorldTime::new("Bucharest", "Europe/Bucharest", false, 8));
+
+                    WorldTimeApp {
+                        cities: vec![austin, nyc, london, berlin, bucharest],
+                        last_update: std::time::Instant::now(),
+                    }
+                })
+            },
+        )
+        .unwrap();
+    });
 }
